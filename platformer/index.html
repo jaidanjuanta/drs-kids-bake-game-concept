@@ -8,12 +8,10 @@
   * { margin:0; padding:0; box-sizing:border-box; }
   body {
     background:#1E66A8;
-    display:flex; flex-direction:column;
-    justify-content:center; align-items:center;
-    height:100vh; overflow:hidden;
+    overflow:hidden;
     font-family:'Arial Black', Arial, sans-serif;
   }
-  canvas { display:block; cursor:pointer; image-rendering:pixelated; }
+  canvas { display:block; cursor:pointer; position:fixed; top:0; left:0; }
   #back { position:fixed; top:14px; left:14px; z-index:10; background:#2878C0; color:#fff;
     font:bold 13px "Arial Black",Arial; border:none; border-radius:20px; padding:8px 18px;
     cursor:pointer; text-decoration:none; letter-spacing:0.5px; }
@@ -27,7 +25,9 @@
 const canvas = document.getElementById('g');
 const ctx    = canvas.getContext('2d');
 const W = 900, H = 520;
-canvas.width = W; canvas.height = H;
+function resizeCanvas() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
 
 // ── Palette (same kitchen world) ───────────────────────────
 const C = {
@@ -780,6 +780,7 @@ function loop() {
 
   if(state==='playing') update();
 
+  ctx.setTransform(canvas.width/W, 0, 0, canvas.height/H, 0, 0);
   ctx.clearRect(0,0,W,H);
 
   if(state==='idle') {
