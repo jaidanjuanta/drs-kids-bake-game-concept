@@ -49,6 +49,7 @@ window.addEventListener('keyup',   e => { keys[e.code]=false; });
 
 // Touch / click controls
 let touchLeft=false, touchRight=false, touchJump=false;
+let gScale=1, gOX=0, gOY=0;
 
 // ── Game state ──────────────────────────────────────────────
 let state = 'idle'; // idle | playing | dead | win
@@ -734,8 +735,8 @@ function buildTouchControls() {
   function getTouches(e) {
     for(const t of e.touches){
       const r=canvas.getBoundingClientRect();
-      const cx=(t.clientX-r.left)*(W/r.width);
-      const cy=(t.clientY-r.top)*(H/r.height);
+      const cx=(t.clientX-r.left-gOX)/gScale;
+      const cy=(t.clientY-r.top-gOY)/gScale;
       touchLeft =touchLeft  || (cx>=zones[0].x&&cx<zones[0].x+zones[0].w&&cy>H-110);
       touchRight=touchRight || (cx>=zones[1].x&&cx<zones[1].x+zones[1].w&&cy>H-110);
       touchJump =touchJump  || (cx>=zones[2].x&&cy>H-110);
@@ -780,7 +781,12 @@ function loop() {
 
   if(state==='playing') update();
 
-  ctx.setTransform(canvas.width/W, 0, 0, canvas.height/H, 0, 0);
+  gScale = Math.min(canvas.width/W, canvas.height/H);
+  gOX = (canvas.width - W*gScale)/2; gOY = (canvas.height - H*gScale)/2;
+  ctx.resetTransform();
+  ctx.fillStyle = '#C5D8E8';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(gScale, 0, 0, gScale, gOX, gOY);
   ctx.clearRect(0,0,W,H);
 
   if(state==='idle') {

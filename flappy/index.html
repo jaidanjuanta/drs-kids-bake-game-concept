@@ -525,7 +525,12 @@ function loop() {
   }
 
   // ── Render ───────────────────────────────────────────────────
-  ctx.setTransform(canvas.width/W, 0, 0, canvas.height/H, 0, 0);
+  const _s = Math.min(canvas.width/W, canvas.height/H);
+  const _ox = (canvas.width - W*_s)/2, _oy = (canvas.height - H*_s)/2;
+  ctx.resetTransform();
+  ctx.fillStyle = '#C5D8E8';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(_s, 0, 0, _s, _ox, _oy);
   ctx.clearRect(0,0,W,H);
 
   drawBricks();
