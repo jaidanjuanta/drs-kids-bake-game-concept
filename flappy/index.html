@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flappy Snacker — Drake's Kitchen</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1E66A8;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    font-family: 'Arial Black', Arial, sans-serif;
+    overflow: hidden;
+  }
+  canvas { display: block; cursor: pointer; }
+  #back { position:fixed; top:14px; left:14px; z-index:10; background:#2878C0; color:#fff;
+    font:bold 13px "Arial Black",Arial; border:none; border-radius:20px; padding:8px 18px;
+    cursor:pointer; text-decoration:none; letter-spacing:0.5px; }
+  #back:hover { background:#1E66A8; }
+</style>
+</head>
+<body>
+<a id="back" href="../">← MENU</a>
+<canvas id="game"></canvas>
+<script>
+const canvas = document.getElementById('game');
+const ctx    = canvas.getContext('2d');
+
+const W = 900, H = 500;
+canvas.width = W; canvas.height = H;
+
+// ── Palette ──────────────────────────────────────────────────
+const C = {
+  blue:        '#2878C0',
+  blueDark:    '#1E66A8',
+  blueDeep:    '#174E84',
+  orange:      '#D4895A',
+  green:       '#5BAE5A',
+  purple:      '#8B5E95',
+  yellow:      '#E8D470',
+  brickBg:     '#C5D8E8',
+  brickLine:   '#A8C2D2',
+  ceiling:     '#F0EDE8',
+  counter:     '#ECEAE3',
+  white:       '#FFFFFF',
+  black:       '#1A1A1A',
+  duckGreen:   '#4CAF50',
+  duckShade:   '#3D9142',
+  beak:        '#F5C518',
+  beakDark:    '#C8980A',
+  spoon:       '#C8A96E',
+  spoonDark:   '#A07840',
+  treatRing:   '#F5C518',
+  treatBg:     '#FFFFFF',
+};
+
+// ── Constants ────────────────────────────────────────────────
+const GRAVITY    = 0.38;
+const FLAP       = -7.8;
+const CAB_W      = 80;
+const SPD_INIT   = 2.8;
+const GAP        = 162;
+const CEIL_H     = 68;   // ceiling strip
+const CTR_H      = 64;   // counter strip
+const PLAY_TOP   = CEIL_H;
+const PLAY_BOT   = H - CTR_H;
+
+let state   = 'idle';
+let score   = 0;
+let hi      = 0;
+let frame   = 0;
+
+// ── Bird ─────────────────────────────────────────────────────
+const bird = {
+  x: 155, y: H/2, vy: 0, angle: 0, wing: 0,
+  reset() { this.x=155; this.y=H/2; this.vy=0; this.angle=0; this.wing=0; },
+  flap()  { this.vy=FLAP; this.wing=12; },
+  update() {
+    this.vy += GRAVITY; this.y += this.vy;
+    this.angle = Math.max(-28, Math.min(75, this.vy * 4));
+    if (this.wing > 0) this.wing--;
+  },
+  get top()    { return this.y - 28; },
+  get bottom() { return this.y + 30; },
+  get left()   { return this.x - 24; },
+  get right()  { return this.x + 24; },
+};
+
+// ── Obstacles ────────────────────────────────────────────────
+let cabs = [], speed = SPD_INIT;
+function spawnCab() {
+  const min = PLAY_TOP + 44, max = PLAY_BOT - GAP - 44;
+  cabs.push({ x: W+10, topH: min + Math.random()*(max-min) });
+}
+
+// ── Treats ───────────────────────────────────────────────────
+let treats = [];
+const EMOJIS = ['🧁','🍪','🥚','🧈','🍰','🎂','🍩','🥐'];
+function spawnTreat(cx, topH) {
+  treats.push({ x: cx+CAB_W/2, y: topH+GAP/2,
+    type: EMOJIS[Math.floor(Math.random()*EMOJIS.length)], done: false });
+}
+
+// ── Particles ────────────────────────────────────────────────
+let parts = [];
+function burst(x, y, col, n=14) {
+  for (let i=0; i<n; i++) {
+    const a=Math.random()*Math.PI*2, s=2+Math.random()*5;
+    parts.push({ x, y, vx:Math.cos(a)*s, vy:Math.sin(a)*s-2.5,
+      life:34, max:34, col, r:3+Math.random()*4 });
+  }
+}
+
+// ── Scroll ───────────────────────────────────────────────────
+let scrollA=0, scrollB=0, scrollC=0;
+
+// ── Lower cabinet colour rota ────────────────────────────────
+const LC = [C.orange, C.green, C.yellow, C.purple, C.blue, C.orange, C.green, C.yellow];
+
+// ════════════════════════════════════════════
+// DRAW
+// ════════════════════════════════════════════
+
+function drawCeiling() {
+  // Flat cream ceiling
+  ctx.fillStyle = C.ceiling;
+  ctx.fillRect(0, 0, W, CEIL_H);
+
+  // Clean light bars
+  for (let lx=60; lx<W; lx+=200) {
+    ctx.fillStyle = '#FFFCE8';
+    ctx.fillRect(lx, 0, 80, 8);
+    // Two thin drop lines
+    ctx.strokeStyle = '#D0CCC4'; ctx.lineWidth=1.5;
+    [lx+16, lx+64].forEach(px => {
+      ctx.beginPath(); ctx.moveTo(px,8); ctx.lineTo(px,22); ctx.stroke();
+    });
+    // Flat lamp rectangle
+    ctx.fillStyle = C.ceiling;
+    ctx.strokeStyle = C.orange; ctx.lineWidth=2;
+    ctx.fillRect(lx+8, 22, 64, 16);
+    ctx.strokeRect(lx+8, 22, 64, 16);
+  }
+
+  // Row of upper cabinets flush to bottom of ceiling
+  const UW=94, UH=44;
+  const uox=((-(scrollA*0.85)|0)%(UW+5)+UW+5)%(UW+5);
+  for (let i=-1; i<Math.ceil(W/(UW+5))+2; i++) {
+    const ux=uox+i*(UW+5), uy=CEIL_H-UH;
+    // Cabinet body
+    ctx.fillStyle = C.blue;
+    ctx.fillRect(ux, uy, UW, UH);
+    // Inner door recess
+    ctx.fillStyle = C.blueDark;
+    ctx.fillRect(ux+6, uy+6, UW-12, UH-12);
+    // Top highlight strip
+    ctx.fillStyle = 'rgba(255,255,255,0.14)';
+    ctx.fillRect(ux, uy, UW, 4);
+    // Knob
+    drawKnob(ux+UW-18, uy+UH*0.6, C.blueDeep);
+  }
+
+  // Hard shadow line under ceiling
+  ctx.fillStyle = 'rgba(0,0,0,0.10)';
+  ctx.fillRect(0, CEIL_H-2, W, 4);
+}
+
+function drawBricks() {
+  ctx.fillStyle = C.brickBg;
+  ctx.fillRect(0, PLAY_TOP, W, PLAY_BOT-PLAY_TOP);
+
+  const BW=60, BH=22, GAP_B=4;
+  const row_h = BH+GAP_B;
+  const ox=((-(scrollB*0.4)|0)%(BW+GAP_B)+BW+GAP_B)%(BW+GAP_B);
+  ctx.strokeStyle = C.brickLine; ctx.lineWidth=2;
+  ctx.lineCap='square';
+  for (let r=0; r*row_h < (PLAY_BOT-PLAY_TOP+row_h); r++) {
+    const ry=PLAY_TOP+r*row_h;
+    const shift=r%2===0?0:(BW+GAP_B)/2;
+    for (let c=-1; c<Math.ceil(W/(BW+GAP_B))+2; c++) {
+      ctx.strokeRect(ox-shift+c*(BW+GAP_B)+1, ry+1, BW, BH);
+    }
+  }
+}
+
+function drawCounter() {
+  const cy = PLAY_BOT;
+  // Orange trim edge
+  ctx.fillStyle = C.orange;
+  ctx.fillRect(0, cy, W, 10);
+  // Counter surface
+  ctx.fillStyle = C.counter;
+  ctx.fillRect(0, cy+10, W, CTR_H-10);
+
+  // Scrolling lower cabinet fronts
+  const LW=72, LH=CTR_H-16;
+  const lox=((-(scrollC*0.75)|0)%(LW+5)+LW+5)%(LW+5);
+  for (let i=-1; i<Math.ceil(W/(LW+5))+2; i++) {
+    const lx=lox+i*(LW+5), ly=cy+14;
+    const col=LC[((i+20)%LC.length+LC.length)%LC.length];
+    ctx.fillStyle=col; ctx.fillRect(lx, ly, LW, LH);
+    ctx.fillStyle=C.blueDark; ctx.fillRect(lx, ly, LW, 3);
+    ctx.fillStyle='rgba(0,0,0,0.10)'; ctx.fillRect(lx, ly, 3, LH); ctx.fillRect(lx+LW-3, ly, 3, LH);
+    drawKnob(lx+LW*0.65, ly+LH*0.55, 'rgba(0,0,0,0.22)');
+  }
+  // Hard shadow on counter top
+  ctx.fillStyle='rgba(0,0,0,0.08)'; ctx.fillRect(0, cy+10, W, 4);
+}
+
+function drawKnob(x, y, col) {
+  ctx.fillStyle=col; ctx.beginPath(); ctx.arc(x,y,4.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.35)'; ctx.beginPath(); ctx.arc(x-1,y-1,2,0,Math.PI*2); ctx.fill();
+}
+
+// ── Obstacle cabinet pair ─────────────────────────────────────
+function drawObsCab(ox, topH) {
+  const botY=topH+GAP, topSec=topH-PLAY_TOP, botSec=PLAY_BOT-botY;
+
+  function unit(uy, uh) {
+    if (uh<=0) return;
+    // Body
+    ctx.fillStyle=C.blue; ctx.fillRect(ox, uy, CAB_W, uh);
+    // Dark side strips
+    ctx.fillStyle=C.blueDeep;
+    ctx.fillRect(ox, uy, 5, uh); ctx.fillRect(ox+CAB_W-5, uy, 5, uh);
+    // Door panels
+    const PH=42, PW=CAB_W-18;
+    for (let py=uy+8; py<uy+uh-10; py+=PH+7) {
+      const ph=Math.min(PH, uy+uh-py-8);
+      if (ph<14) continue;
+      ctx.fillStyle=C.blueDark; ctx.fillRect(ox+9, py, PW, ph);
+      ctx.fillStyle='rgba(255,255,255,0.10)'; ctx.fillRect(ox+9, py, PW, 3);
+      drawKnob(ox+CAB_W-18, py+ph/2, C.blueDeep);
+    }
+    // Orange trim cap
+    ctx.fillStyle=C.orange;
+    if (uy===PLAY_TOP) ctx.fillRect(ox, uy+uh-6, CAB_W, 6); // bottom of top cab
+    else               ctx.fillRect(ox, uy, CAB_W, 6);      // top of bottom cab
+    // Top highlight
+    ctx.fillStyle='rgba(255,255,255,0.10)'; ctx.fillRect(ox, uy, CAB_W, 3);
+  }
+
+  unit(PLAY_TOP, topSec);
+  unit(botY, botSec);
+}
+
+// ── Treats ───────────────────────────────────────────────────
+function drawTreat(t) {
+  if (t.done) return;
+  const bob  = Math.sin(frame*0.09 + t.x*0.025)*5;
+  const pulse= 1 + Math.sin(frame*0.14)*0.07;
+  const cy   = t.y + bob;
+  const R    = 26 * pulse;
+
+  ctx.save();
+  ctx.translate(t.x, cy);
+
+  // Outer glow ring — bright yellow, fully opaque
+  ctx.strokeStyle = C.treatRing;
+  ctx.lineWidth   = 4;
+  ctx.beginPath(); ctx.arc(0, 0, R+5, 0, Math.PI*2); ctx.stroke();
+
+  // White circle background
+  ctx.fillStyle = C.treatBg;
+  ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI*2); ctx.fill();
+
+  // Thin inner ring
+  ctx.strokeStyle = C.treatRing;
+  ctx.lineWidth   = 2;
+  ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI*2); ctx.stroke();
+
+  // Emoji
+  ctx.font = '26px serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(t.type, 0, 1);
+
+  ctx.restore();
+  ctx.textBaseline = 'alphabetic';
+}
+
+// ── Duck ─────────────────────────────────────────────────────
+function drawDuck(x, y, angle, wing) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle*Math.PI/180);
+
+  const wa = wing>0 ? -0.38 : 0.18;
+
+  // Wings
+  for (const [ex,sign] of [[-23,-1],[23,1]]) {
+    ctx.save(); ctx.rotate(wa*sign);
+    ctx.fillStyle=C.black;
+    ctx.beginPath(); ctx.ellipse(ex, 8, 11, 6, sign*0.3, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+
+  // Body — flat, two-tone
+  ctx.fillStyle=C.duckShade;
+  ctx.beginPath(); ctx.ellipse(4, 6, 24, 25, 0.1, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle=C.duckGreen;
+  ctx.beginPath(); ctx.ellipse(-1, 3, 23, 25, -0.08, 0, Math.PI*2); ctx.fill();
+
+  // White chest
+  ctx.fillStyle=C.white;
+  ctx.beginPath(); ctx.ellipse(0, 14, 11, 12, 0, 0, Math.PI*2); ctx.fill();
+
+  // Apron pocket
+  ctx.fillStyle='#DADADA';
+  ctx.beginPath(); ctx.roundRect(-6, 17, 13, 9, 3); ctx.fill();
+
+  // Eyes — flat filled arcs (squint)
+  for (const ex of [-9, 9]) {
+    ctx.fillStyle=C.black;
+    ctx.beginPath(); ctx.arc(ex, -5, 5.5, 0, Math.PI*2); ctx.fill();
+    // Green lid over top to create squint
+    ctx.fillStyle=C.duckGreen;
+    ctx.beginPath(); ctx.ellipse(ex, -7.5, 5.5, 4, 0, Math.PI, Math.PI*2); ctx.fill();
+    // Shine
+    ctx.fillStyle=C.white;
+    ctx.beginPath(); ctx.arc(ex-1.5, -6, 1.6, 0, Math.PI*2); ctx.fill();
+  }
+
+  // Beak
+  ctx.fillStyle=C.beak;
+  ctx.beginPath(); ctx.ellipse(0, -1, 11, 5, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle='#E0B010';
+  ctx.beginPath(); ctx.ellipse(0, 2, 11, 3.5, 0, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle=C.beakDark; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(-10,1); ctx.lineTo(10,1); ctx.stroke();
+
+  // Feet
+  ctx.fillStyle=C.beak;
+  ctx.beginPath(); ctx.roundRect(-11,27,10,6,2); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(2,27,10,6,2); ctx.fill();
+
+  // Hat brim
+  ctx.fillStyle=C.white;
+  ctx.beginPath(); ctx.ellipse(0,-25,19,7,0,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='#DDD'; ctx.lineWidth=1.5; ctx.stroke();
+  // Hat body
+  ctx.fillStyle=C.white;
+  ctx.fillRect(-14,-51,28,28);
+  ctx.beginPath(); ctx.ellipse(0,-51,15,9,0,0,Math.PI*2); ctx.fill();
+  // Crinkle lines
+  ctx.strokeStyle='#DDD'; ctx.lineWidth=1.2;
+  for (const hx of [-7,0,7]) {
+    ctx.beginPath(); ctx.moveTo(hx,-48); ctx.lineTo(hx,-28); ctx.stroke();
+  }
+
+  // Spoon
+  ctx.save(); ctx.translate(21,17); ctx.rotate(0.65);
+  ctx.fillStyle=C.spoon; ctx.fillRect(-2,-24,4,34);
+  ctx.beginPath(); ctx.ellipse(0,-27,6,9,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=C.spoonDark; ctx.fillRect(-2,-23,4,3);
+  ctx.restore();
+
+  ctx.restore();
+}
+
+// ── Particles ────────────────────────────────────────────────
+function drawParts() {
+  parts.forEach(p => {
+    ctx.globalAlpha = p.life/p.max;
+    ctx.fillStyle=p.col;
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+  });
+  ctx.globalAlpha=1;
+}
+
+// ── HUD ──────────────────────────────────────────────────────
+// Consistent pill shape, same height, same font style across all 3 panels
+const HUD_H=46, HUD_R=23;
+
+function hudPill(x, y, w, bg) {
+  ctx.fillStyle=bg;
+  ctx.beginPath(); ctx.roundRect(x,y,w,HUD_H,HUD_R); ctx.fill();
+}
+
+function drawHUD() {
+  // Left — speed bar (green)
+  hudPill(12, 10, 118, C.green);
+  ctx.fillStyle=C.white; ctx.font='bold 9px Arial'; ctx.textAlign='left';
+  ctx.fillText('KITCHEN HEAT', 28, 24);
+  const pct=Math.min(1,(speed-SPD_INIT)/4);
+  ctx.fillStyle='rgba(0,0,0,0.18)';
+  ctx.beginPath(); ctx.roundRect(22,30,88,10,5); ctx.fill();
+  ctx.fillStyle=pct>0.7?'#E74C3C':pct>0.4?C.beak:C.white;
+  ctx.beginPath(); ctx.roundRect(22,30,Math.max(10,88*pct),10,5); ctx.fill();
+
+  // Centre — score (blue)
+  hudPill(W/2-74, 10, 148, C.blue);
+  ctx.fillStyle=C.white; ctx.font='bold 10px Arial'; ctx.textAlign='center';
+  ctx.fillText('TREATS COLLECTED', W/2, 25);
+  ctx.font='bold 22px Arial Black';
+  ctx.fillText(score, W/2, 49);
+
+  // Right — best (orange)
+  hudPill(W-134, 10, 122, C.orange);
+  ctx.fillStyle=C.white; ctx.font='bold 9px Arial'; ctx.textAlign='center';
+  ctx.fillText('BEST', W-73, 25);
+  ctx.font='bold 22px Arial Black';
+  ctx.fillText(hi, W-73, 49);
+}
+
+// ── Modal card helper ─────────────────────────────────────────
+function drawCard(cx, cy, w, h, headerBg, title) {
+  ctx.fillStyle=C.white;
+  ctx.beginPath(); ctx.roundRect(cx-w/2, cy-h/2, w, h, 18); ctx.fill();
+  ctx.fillStyle=headerBg;
+  ctx.beginPath(); ctx.roundRect(cx-w/2, cy-h/2, w, 58, [18,18,0,0]); ctx.fill();
+  ctx.fillStyle=C.white; ctx.font='bold 22px Arial Black'; ctx.textAlign='center';
+  ctx.fillText(title, cx, cy-h/2+38);
+}
+
+function drawBtn(cx, cy, w, h, bg, label) {
+  ctx.fillStyle=bg;
+  ctx.beginPath(); ctx.roundRect(cx-w/2, cy-h/2, w, h, h/2); ctx.fill();
+  ctx.fillStyle=C.white; ctx.font=`bold ${h>42?20:16}px Arial Black`; ctx.textAlign='center';
+  ctx.fillText(label, cx, cy+7);
+}
+
+// ── Start screen ─────────────────────────────────────────────
+function drawStart() {
+  ctx.fillStyle='rgba(24,80,136,0.80)';
+  ctx.fillRect(0,0,W,H);
+  drawCard(W/2, H/2-20, 460, 320, C.blue, "DRAKE'S FRESH KITCHEN");
+
+  ctx.fillStyle=C.blue; ctx.font='bold 40px Arial Black'; ctx.textAlign='center';
+  ctx.fillText('FLAPPY SNACKER', W/2, H/2+10);
+
+  ctx.fillStyle='#666'; ctx.font='14px Arial';
+  ctx.fillText('Fly through the kitchen & collect baking treats!', W/2, H/2+38);
+  ctx.fillText('Tap · Click · Space to flap', W/2, H/2+58);
+
+  drawDuck(W/2, H/2+128, Math.sin(frame*0.05)*7, frame%22<11?10:0);
+  drawBtn(W/2, H/2+148, 260, 46, C.green, 'TAP / SPACE TO START');
+}
+
+// ── Dead screen ───────────────────────────────────────────────
+function drawDead() {
+  ctx.fillStyle='rgba(24,80,136,0.75)';
+  ctx.fillRect(0,0,W,H);
+  drawCard(W/2, H/2, 420, 280, C.orange, 'CABINET CLASH!');
+
+  ctx.fillStyle='#555'; ctx.font='bold 14px Arial'; ctx.textAlign='center';
+  ctx.fillText('Treats collected:', W/2, H/2-52);
+  ctx.fillStyle=C.blue; ctx.font='bold 54px Arial Black';
+  ctx.fillText(score, W/2, H/2+4);
+
+  ctx.fillStyle='#999'; ctx.font='14px Arial';
+  ctx.fillText(`Best: ${hi}`, W/2, H/2+30);
+
+  if (score>0 && score===hi) {
+    ctx.fillStyle=C.green; ctx.font='bold 14px Arial Black';
+    ctx.fillText('NEW HIGH SCORE! 🎂', W/2, H/2+52);
+  }
+
+  drawBtn(W/2, H/2+94, 220, 44, C.blue, 'BAKE AGAIN');
+}
+
+// ── Collision ─────────────────────────────────────────────────
+function hit() {
+  if (bird.top<PLAY_TOP || bird.bottom>PLAY_BOT) return true;
+  for (const c of cabs)
+    if (bird.right>c.x+5 && bird.left<c.x+CAB_W-5)
+      if (bird.top<c.topH || bird.bottom>c.topH+GAP) return true;
+  return false;
+}
+
+// ── Input ─────────────────────────────────────────────────────
+function input() {
+  if (state==='idle') {
+    state='playing'; bird.reset(); cabs=[]; treats=[]; score=0; speed=SPD_INIT;
+    bird.flap();
+  } else if (state==='playing') { bird.flap();
+  } else if (state==='dead')    { state='idle'; }
+}
+canvas.addEventListener('click', input);
+window.addEventListener('keydown', e => { if (e.code==='Space'||e.code==='ArrowUp'){e.preventDefault();input();} });
+canvas.addEventListener('touchstart', e => { e.preventDefault(); input(); }, {passive:false});
+
+// ── Loop ─────────────────────────────────────────────────────
+let nextCab=300;
+
+function loop() {
+  requestAnimationFrame(loop);
+  frame++;
+
+  if (state==='playing') {
+    scrollA+=speed*0.9; scrollB+=speed*0.5; scrollC+=speed*0.75;
+
+    if (--nextCab<=0) {
+      spawnCab();
+      spawnTreat(cabs[cabs.length-1].x, cabs[cabs.length-1].topH);
+      nextCab=250+Math.random()*60;
+    }
+
+    cabs.forEach(c => c.x-=speed);
+    cabs=cabs.filter(c=>c.x>-CAB_W-10);
+
+    treats.forEach(t => {
+      t.x-=speed;
+      if (!t.done) {
+        const dx=bird.x-t.x, dy=bird.y-t.y;
+        if (dx*dx+dy*dy<900) {
+          t.done=true; score++; if(score>hi)hi=score;
+          burst(t.x,t.y,C.treatRing); burst(t.x,t.y,C.green,8);
+          speed=SPD_INIT+score*0.07;
+        }
+      }
+    });
+    treats=treats.filter(t=>t.x>-60);
+
+    parts.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.vy+=0.15;p.life--;});
+    parts=parts.filter(p=>p.life>0);
+
+    bird.update();
+
+    if (hit()) {
+      state='dead'; if(score>hi)hi=score;
+      burst(bird.x,bird.y,C.orange,16); burst(bird.x,bird.y,C.blue,10);
+    }
+  }
+
+  // ── Render ───────────────────────────────────────────────────
+  ctx.clearRect(0,0,W,H);
+
+  drawBricks();
+  drawCeiling();
+
+  cabs.forEach(c => drawObsCab(c.x, c.topH));
+  treats.forEach(drawTreat);
+  drawParts();
+  drawCounter();
+
+  if (state!=='idle') drawDuck(bird.x, bird.y, bird.angle, bird.wing);
+  if (state==='playing'||state==='dead') drawHUD();
+  if (state==='idle') drawStart();
+  if (state==='dead') drawDead();
+}
+
+loop();
+</script>
+</body>
+</html>

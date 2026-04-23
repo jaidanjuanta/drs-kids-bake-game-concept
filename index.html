@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Late Night Snacker — Drake's Kitchen</title>
+<style>
+  *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    font-family: 'Arial Black', Arial, sans-serif;
+    background: #C5D8E8;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+  }
+
+  /* ── Brick background ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 22px,
+        rgba(168,194,210,0.7) 22px,
+        rgba(168,194,210,0.7) 24px
+      ),
+      repeating-linear-gradient(
+        90deg,
+        transparent,
+        transparent 60px,
+        rgba(168,194,210,0.7) 60px,
+        rgba(168,194,210,0.7) 62px
+      );
+    background-size: 64px 26px, 64px 26px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── Ceiling strip ── */
+  .ceiling {
+    position: relative;
+    z-index: 1;
+    background: #F0EDE8;
+    padding: 0 0 0 0;
+    height: 72px;
+    display: flex;
+    align-items: flex-end;
+    overflow: hidden;
+    box-shadow: 0 3px 0 rgba(0,0,0,0.10);
+  }
+
+  .cabinets {
+    display: flex;
+    gap: 5px;
+    padding: 4px 8px 0;
+    align-items: flex-end;
+  }
+
+  .cabinet-unit {
+    width: 92px;
+    height: 44px;
+    background: #2878C0;
+    border-radius: 2px;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .cabinet-unit::after {
+    content: '';
+    position: absolute;
+    inset: 5px;
+    background: #174E84;
+    border-radius: 1px;
+  }
+
+  /* ── Main content ── */
+  main {
+    position: relative;
+    z-index: 1;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    gap: 32px;
+  }
+
+  .brand {
+    text-align: center;
+  }
+
+  .brand-sub {
+    display: inline-block;
+    background: #2878C0;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 900;
+    letter-spacing: 2px;
+    padding: 6px 20px;
+    border-radius: 20px;
+    margin-bottom: 12px;
+  }
+
+  .brand-title {
+    font-size: clamp(36px, 7vw, 64px);
+    font-weight: 900;
+    color: #1E66A8;
+    line-height: 1;
+    text-shadow: 3px 3px 0 rgba(0,0,0,0.10);
+    letter-spacing: -1px;
+  }
+
+  .brand-tagline {
+    font-size: 16px;
+    color: #5a7a95;
+    font-family: Arial, sans-serif;
+    font-weight: normal;
+    margin-top: 8px;
+  }
+
+  /* ── Game cards ── */
+  .games {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    justify-content: center;
+    width: 100%;
+    max-width: 860px;
+  }
+
+  .card {
+    text-decoration: none;
+    background: #fff;
+    border-radius: 18px;
+    overflow: hidden;
+    width: 380px;
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    box-shadow: 0 4px 0 rgba(0,0,0,0.12);
+  }
+
+  .card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 0 rgba(0,0,0,0.12);
+  }
+
+  .card-header {
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .card-header h2 {
+    color: #fff;
+    font-size: 20px;
+    letter-spacing: 1px;
+  }
+
+  .card-preview {
+    height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 80px;
+    background: #C5D8E8;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Brick pattern inside preview */
+  .card-preview::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      repeating-linear-gradient(0deg, transparent, transparent 22px, rgba(168,194,210,0.6) 22px, rgba(168,194,210,0.6) 24px),
+      repeating-linear-gradient(90deg, transparent, transparent 60px, rgba(168,194,210,0.6) 60px, rgba(168,194,210,0.6) 62px);
+    background-size: 64px 26px;
+  }
+
+  .card-emoji {
+    position: relative;
+    z-index: 1;
+    filter: drop-shadow(2px 4px 6px rgba(0,0,0,0.15));
+    line-height: 1;
+  }
+
+  .card-body {
+    padding: 20px 24px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex: 1;
+  }
+
+  .card-desc {
+    font-size: 14px;
+    color: #666;
+    font-family: Arial, sans-serif;
+    font-weight: normal;
+    line-height: 1.5;
+  }
+
+  .card-tags {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .tag {
+    font-size: 11px;
+    font-weight: 900;
+    padding: 4px 10px;
+    border-radius: 12px;
+    color: #fff;
+    letter-spacing: 0.5px;
+  }
+
+  .card-btn {
+    display: block;
+    text-align: center;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 900;
+    font-family: 'Arial Black', Arial, sans-serif;
+    padding: 14px;
+    border-radius: 10px;
+    margin-top: auto;
+    letter-spacing: 1px;
+    transition: filter 0.1s;
+  }
+
+  .card-btn:hover { filter: brightness(0.9); }
+
+  /* Flappy = orange accent */
+  .card--flappy .card-header  { background: #D4895A; }
+  .card--flappy .tag           { background: #D4895A; }
+  .card--flappy .card-btn      { background: #D4895A; }
+
+  /* Platformer = green accent */
+  .card--platformer .card-header { background: #5BAE5A; }
+  .card--platformer .tag          { background: #5BAE5A; }
+  .card--platformer .card-btn     { background: #5BAE5A; }
+
+  /* ── Counter floor ── */
+  .counter {
+    position: relative;
+    z-index: 1;
+    background: #ECEAE3;
+  }
+  .counter-edge {
+    height: 10px;
+    background: #D4895A;
+  }
+  .counter-body {
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .counter-body span {
+    font-size: 12px;
+    color: #999;
+    font-family: Arial, sans-serif;
+    font-weight: normal;
+  }
+  .counter-body strong {
+    font-size: 12px;
+    color: #2878C0;
+    letter-spacing: 1px;
+  }
+
+  /* ── Lower cabinet strip ── */
+  .lower-cabs {
+    display: flex;
+    gap: 4px;
+    padding: 0 6px;
+    overflow: hidden;
+    height: 40px;
+    align-items: flex-end;
+  }
+  .lcab {
+    height: 36px;
+    width: 72px;
+    border-radius: 2px 2px 0 0;
+    flex-shrink: 0;
+    position: relative;
+  }
+  .lcab::after {
+    content: '';
+    position: absolute;
+    top: 3px; left: 3px; right: 3px; bottom: 0;
+    background: rgba(0,0,0,0.12);
+    border-radius: 1px 1px 0 0;
+  }
+</style>
+</head>
+<body>
+
+<!-- Ceiling with cabinet row -->
+<div class="ceiling">
+  <div class="cabinets">
+    <div class="cabinet-unit"></div><div class="cabinet-unit"></div>
+    <div class="cabinet-unit"></div><div class="cabinet-unit"></div>
+    <div class="cabinet-unit"></div><div class="cabinet-unit"></div>
+    <div class="cabinet-unit"></div><div class="cabinet-unit"></div>
+    <div class="cabinet-unit"></div><div class="cabinet-unit"></div>
+  </div>
+</div>
+
+<main>
+  <!-- Brand -->
+  <div class="brand">
+    <div class="brand-sub">DRAKE'S FRESH KITCHEN</div>
+    <div class="brand-title">LATE NIGHT<br>SNACKER</div>
+    <p class="brand-tagline">Two games. One kitchen. Pick your adventure.</p>
+  </div>
+
+  <!-- Game cards -->
+  <div class="games">
+
+    <a class="card card--flappy" href="flappy/">
+      <div class="card-header"><h2>FLAPPY SNACKER</h2></div>
+      <div class="card-preview">
+        <span class="card-emoji">🐤</span>
+      </div>
+      <div class="card-body">
+        <p class="card-desc">Guide the chef duck through the kitchen cabinets and collect baking treats. How far can you fly?</p>
+        <div class="card-tags">
+          <span class="tag">TAP TO FLAP</span>
+          <span class="tag">HIGH SCORE</span>
+          <span class="tag">ENDLESS</span>
+        </div>
+        <span class="card-btn">PLAY →</span>
+      </div>
+    </a>
+
+    <a class="card card--platformer" href="platformer/">
+      <div class="card-header"><h2>KITCHEN RUN</h2></div>
+      <div class="card-preview">
+        <span class="card-emoji">🍳</span>
+      </div>
+      <div class="card-body">
+        <p class="card-desc">Run and jump through the kitchen, stomp angry eggs, hit treat blocks and reach the flag before time runs out.</p>
+        <div class="card-tags">
+          <span class="tag">RUN & JUMP</span>
+          <span class="tag">STOMP EGGS</span>
+          <span class="tag">COLLECT TREATS</span>
+        </div>
+        <span class="card-btn">PLAY →</span>
+      </div>
+    </a>
+
+  </div>
+</main>
+
+<!-- Counter floor -->
+<div class="counter">
+  <div class="counter-edge"></div>
+  <div class="lower-cabs">
+    <div class="lcab" style="background:#D4895A"></div>
+    <div class="lcab" style="background:#5BAE5A"></div>
+    <div class="lcab" style="background:#E8D470"></div>
+    <div class="lcab" style="background:#8B5E95"></div>
+    <div class="lcab" style="background:#2878C0"></div>
+    <div class="lcab" style="background:#D4895A"></div>
+    <div class="lcab" style="background:#5BAE5A"></div>
+    <div class="lcab" style="background:#E8D470"></div>
+    <div class="lcab" style="background:#8B5E95"></div>
+    <div class="lcab" style="background:#2878C0"></div>
+    <div class="lcab" style="background:#D4895A"></div>
+    <div class="lcab" style="background:#5BAE5A"></div>
+  </div>
+  <div class="counter-body">
+    <span>Made for</span>
+    <strong>DRAKE'S SUPERMARKETS</strong>
+    <span>· Fresh Kitchen Series</span>
+  </div>
+</div>
+
+</body>
+</html>

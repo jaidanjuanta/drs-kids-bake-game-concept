@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Late Night Snacker — Drake's Kitchen Run</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background:#1E66A8;
+    display:flex; flex-direction:column;
+    justify-content:center; align-items:center;
+    height:100vh; overflow:hidden;
+    font-family:'Arial Black', Arial, sans-serif;
+  }
+  canvas { display:block; cursor:pointer; image-rendering:pixelated; }
+  #back { position:fixed; top:14px; left:14px; z-index:10; background:#2878C0; color:#fff;
+    font:bold 13px "Arial Black",Arial; border:none; border-radius:20px; padding:8px 18px;
+    cursor:pointer; text-decoration:none; letter-spacing:0.5px; }
+  #back:hover { background:#1E66A8; }
+</style>
+</head>
+<body>
+<a id="back" href="../">← MENU</a>
+<canvas id="g"></canvas>
+<script>
+const canvas = document.getElementById('g');
+const ctx    = canvas.getContext('2d');
+const W = 900, H = 520;
+canvas.width = W; canvas.height = H;
+
+// ── Palette (same kitchen world) ───────────────────────────
+const C = {
+  blue:'#2878C0', blueDark:'#1E66A8', blueDeep:'#174E84',
+  orange:'#D4895A', green:'#5BAE5A', purple:'#8B5E95', yellow:'#E8D470',
+  brickBg:'#C5D8E8', brickLine:'#A8C2D2',
+  ceiling:'#F0EDE8', counter:'#ECEAE3',
+  white:'#FFFFFF', black:'#1A1A1A',
+  duckGreen:'#4CAF50', duckShade:'#3D9142',
+  beak:'#F5C518', beakDark:'#C8980A',
+  spoon:'#C8A96E', spoonDark:'#A07840',
+  treat:'#F5C518',
+};
+
+// ── Input ───────────────────────────────────────────────────
+const keys = {};
+window.addEventListener('keydown', e => { keys[e.code]=true;  e.preventDefault(); });
+window.addEventListener('keyup',   e => { keys[e.code]=false; });
+
+// Touch / click controls
+let touchLeft=false, touchRight=false, touchJump=false;
+
+// ── Game state ──────────────────────────────────────────────
+let state = 'idle'; // idle | playing | dead | win
+let frame = 0;
+let score = 0;
+let hi    = 0;
+let lives = 3;
+
+// ── Camera ──────────────────────────────────────────────────
+let camX = 0;
+
+// ── World constants ─────────────────────────────────────────
+const TILE   = 40;
+const GR     = 0.55;   // gravity
+const JUMP   = -13;
+const SPEED  = 4.2;
+const LEVEL_W = 120;   // tiles wide
+
+// ── Player ──────────────────────────────────────────────────
+const player = {
+  x:80, y:200, vx:0, vy:0,
+  w:40, h:34,   // hitbox = body only; hat is purely visual and clips through blocks
+  onGround:false,
+  facing:1,
+  walkFrame:0,
+  invincible:0,
+  reset() {
+    this.x=80; this.y=200; this.vx=0; this.vy=0;
+    this.onGround=false; this.facing=1;
+    this.walkFrame=0; this.invincible=0;
+  },
+};
+
+// ── Tile types ──────────────────────────────────────────────
+// 0=air, 1=blue cabinet, 2=counter/ground, 3=brick shelf,
+// 4=orange cabinet, 5=green cabinet, 6=treat block (?)
+// 7=pipe/can, 8=cloud shelf
+
+// ── Level map ───────────────────────────────────────────────
+// Each row is bottom→top, left→right
+// We build a flat array: map[row][col], row 0 = bottom
+const ROWS = 14, COLS = LEVEL_W;
+let map = Array.from({length:ROWS}, ()=>new Array(COLS).fill(0));
+
+function setTile(col, row, type) {
+  if (row>=0&&row<ROWS&&col>=0&&col<COLS) map[row][col]=type;
+}
+function getTile(col, row) {
+  if (col<0||col>=COLS||row<0||row>=ROWS) return row<0?1:0;
+  return map[row][col];
+}
+
+function buildLevel() {
+  // Ground row (row 0)
+  for (let c=0;c<COLS;c++) setTile(c,0,2);
+
+  // Floor row 1 (countertop depth)
+  for (let c=0;c<COLS;c++) setTile(c,1,2);
+
+  // Ceiling row 13
+  for (let c=0;c<COLS;c++) setTile(c,12,1);
+  for (let c=0;c<COLS;c++) setTile(c,13,1);
+
+  // Platforms — blue cabinets
+  const platforms = [
+    // [startCol, row, length, type]
+    [5,  4, 5, 1], [12, 6, 4, 4], [18, 4, 5, 5],
+    [25, 7, 4, 1], [30, 5, 3, 4], [35, 8, 5, 5],
+    [42, 5, 4, 1], [48, 3, 4, 1], [53, 6, 5, 4],
+    [60, 8, 3, 5], [65, 6, 4, 1], [68, 4, 3, 4],
+    [74, 7, 5, 1], [80, 5, 4, 5], [85, 3, 3, 4],
+    [90, 6, 4, 1], [96, 8, 5, 5], [102,5, 4, 1],
+    [108,7, 4, 4], [113,4, 5, 5],
+  ];
+  platforms.forEach(([c,r,l,t])=>{ for(let i=0;i<l;i++) setTile(c+i,r,t); });
+
+  // Treat blocks (?)
+  const tBlocks = [
+    [7,7],[14,9],[20,7],[27,10],[32,8],[45,8],[50,6],
+    [55,9],[63,10],[67,9],[76,10],[82,8],[91,9],[104,8],[110,7],
+  ];
+  tBlocks.forEach(([c,r])=>setTile(c,r,6));
+
+  // Brick shelves
+  const bricks = [
+    [9,5,3],[22,5,3],[38,4,4],[70,5,3],[95,4,3],[116,5,3],
+  ];
+  bricks.forEach(([c,r,l])=>{ for(let i=0;i<l;i++) setTile(c+i,r,3); });
+}
+
+// ── Collectibles ────────────────────────────────────────────
+let coins  = [];
+let treats = [];
+const TREAT_EMOJIS = ['🧁','🍪','🥚','🍰','🎂','🍩','🥐','🧈'];
+
+function buildCollectibles() {
+  coins  = [];
+  treats = [];
+  // Coins above most platforms
+  for (let c=0;c<COLS;c++) {
+    for (let r=1;r<ROWS;r++) {
+      if (getTile(c,r)!==0) {
+        // place coin above solid tile if air above
+        if (getTile(c,r+1)===0 && r<11 && Math.random()<0.35) {
+          coins.push({ col:c, row:r+1, x:c*TILE+TILE/2, y:(ROWS-1-r-1)*TILE+TILE/2, done:false });
+        }
+      }
+    }
+  }
+  // Treats above treat blocks
+  for (let c=0;c<COLS;c++) {
+    for (let r=0;r<ROWS;r++) {
+      if (getTile(c,r)===6) {
+        treats.push({
+          col:c, row:r,
+          x:c*TILE+TILE/2, y:(ROWS-1-r)*TILE - TILE*0.5,
+          type:TREAT_EMOJIS[Math.floor(Math.random()*TREAT_EMOJIS.length)],
+          done:false, hidden:true, popAnim:0,
+        });
+      }
+    }
+  }
+}
+
+// ── Enemies ─────────────────────────────────────────────────
+let enemies = [];
+// Deliberately placed — one per meaningful stretch, none in opening safe zone
+const ENEMY_COLS = [14, 28, 44, 60, 75, 90, 104, 116];
+
+function buildEnemies() {
+  enemies = [];
+  ENEMY_COLS.forEach(col => {
+    // find ground level at this col
+    let r=0;
+    for(let rr=1;rr<ROWS;rr++){
+      if(getTile(col,rr)!==0){ r=rr; break; }
+    }
+    const worldY = (ROWS-1-r)*TILE - 36;
+    enemies.push({
+      x:col*TILE, y:worldY,
+      w:36, h:36,
+      vx:-1.2, alive:true,
+      stomped:false, stompAnim:0,
+      col, groundRow:r,
+    });
+  });
+}
+
+// ── Goal flag ───────────────────────────────────────────────
+const GOAL_X = (LEVEL_W-3)*TILE;
+
+// ── Init game ────────────────────────────────────────────────
+function initGame() {
+  buildLevel();
+  buildCollectibles();
+  buildEnemies();
+  player.reset();
+  camX=0; score=0; lives=3;
+}
+
+// ── Physics helpers ─────────────────────────────────────────
+function tileRect(col, row) {
+  return { x:col*TILE, y:(ROWS-1-row)*TILE, w:TILE, h:TILE };
+}
+
+function overlap(ax,ay,aw,ah, bx,by,bw,bh) {
+  return ax<bx+bw && ax+aw>bx && ay<by+bh && ay+ah>by;
+}
+
+function resolvePlayer() {
+  const px=player.x, py=player.y, pw=player.w, ph=player.h;
+  player.onGround=false;
+
+  // Vertical
+  player.y += player.vy;
+  const minC=Math.max(0,Math.floor(player.x/TILE)-1);
+  const maxC=Math.min(COLS-1,Math.ceil((player.x+pw)/TILE)+1);
+  const minR=Math.max(0,Math.floor((ROWS*TILE-player.y-ph)/TILE)-1);
+  const maxR=Math.min(ROWS-1,Math.ceil((ROWS*TILE-player.y)/TILE)+1);
+
+  for (let c=minC;c<=maxC;c++) {
+    for (let r=minR;r<=maxR;r++) {
+      if (getTile(c,r)===0) continue;
+      const tr=tileRect(c,r);
+      if (!overlap(player.x,player.y,pw,ph,tr.x,tr.y,tr.w,tr.h)) continue;
+      if (player.vy>0) { // falling
+        player.y=tr.y-ph; player.vy=0; player.onGround=true;
+      } else if (player.vy<0) { // rising
+        player.y=tr.y+tr.h; player.vy=0;
+        // Hit treat block?
+        const tt=treats.find(t=>t.col===c&&t.row===r&&t.hidden&&!t.done);
+        if(tt){ tt.hidden=false; tt.popAnim=20; score+=50; setTile(c,r,9); }
+        else if(getTile(c,r)===6){ setTile(c,r,9); } // already collected, still dull it
+      }
+    }
+  }
+
+  // Horizontal
+  player.x += player.vx;
+  for (let c=minC;c<=maxC;c++) {
+    for (let r=minR;r<=maxR;r++) {
+      if (getTile(c,r)===0) continue;
+      const tr=tileRect(c,r);
+      if (!overlap(player.x,player.y,pw,ph,tr.x,tr.y,tr.w,tr.h)) continue;
+      if (player.vx>0) player.x=tr.x-pw;
+      else if (player.vx<0) player.x=tr.x+tr.w;
+      player.vx=0;
+    }
+  }
+}
+
+// ── Update ───────────────────────────────────────────────────
+function update() {
+  // Controls
+  const left  = keys['ArrowLeft']  || keys['KeyA'] || touchLeft;
+  const right = keys['ArrowRight'] || keys['KeyD'] || touchRight;
+  const jump  = keys['ArrowUp']    || keys['KeyW'] || keys['Space'] || touchJump;
+
+  if (left)  { player.vx=-SPEED; player.facing=-1; }
+  else if (right) { player.vx=SPEED; player.facing=1; }
+  else player.vx*=0.7;
+
+  if (jump && player.onGround) player.vy=JUMP;
+
+  player.vy+=GR;
+  if (player.vy>18) player.vy=18;
+
+  if (Math.abs(player.vx) > 0.5) player.walkFrame++;
+  else player.walkFrame = 0;
+
+  resolvePlayer();
+
+  // Bounds
+  if (player.x<0) player.x=0;
+  if (player.x>GOAL_X+TILE) { state='win'; return; }
+
+  // Fell off world
+  if (player.y>ROWS*TILE+80) {
+    lives--; if(lives<=0){state='dead';} else { player.reset(); camX=0; }
+    return;
+  }
+
+  if (player.invincible>0) player.invincible--;
+
+  // Camera
+  const targetCam = player.x - W*0.3;
+  camX += (targetCam - camX)*0.12;
+  camX = Math.max(0, Math.min(camX, LEVEL_W*TILE - W));
+
+  // Coins
+  coins.forEach(coin=>{
+    if(coin.done) return;
+    if(overlap(player.x,player.y,player.w,player.h, coin.x-12,coin.y-12,24,24)) {
+      coin.done=true; score+=10;
+    }
+  });
+
+  // Treats
+  treats.forEach(t=>{
+    if(t.done||t.hidden) return;
+    if(t.popAnim>0) t.popAnim--;
+    if(overlap(player.x,player.y,player.w,player.h, t.x-18,t.y-18,36,36)) {
+      t.done=true; score+=100;
+    }
+  });
+
+  // Enemies
+  enemies.forEach(en=>{
+    if(!en.alive) return;
+    en.x+=en.vx;
+
+    // Reverse at tile edges
+    const nextC=Math.floor((en.x+(en.vx>0?en.w:0))/TILE);
+    const floorR=en.groundRow-1;
+    if(getTile(nextC,floorR)===0||getTile(nextC,en.groundRow)===0) en.vx*=-1;
+
+    // Player stomp
+    if(!en.stomped && player.invincible===0 &&
+       overlap(player.x+4,player.y+4,player.w-8,player.h-8,en.x,en.y,en.w,en.h)) {
+      if(player.vy>0 && player.y+player.h<en.y+en.h*0.6) {
+        // Stomp!
+        en.stomped=true; en.stompAnim=30; en.alive=false;
+        player.vy=JUMP*0.6; score+=200;
+      } else if(player.invincible===0) {
+        // Hurt
+        lives--;
+        player.invincible=90;
+        player.vy=JUMP*0.7; player.vx=-player.facing*3;
+        if(lives<=0) state='dead';
+      }
+    }
+  });
+}
+
+// ════════════════════════════════════════════
+// DRAW FUNCTIONS
+// ════════════════════════════════════════════
+
+function worldToScreen(wx, wy) {
+  return [wx - camX, wy];
+}
+
+// ── Tile drawing ─────────────────────────────────────────────
+const TILE_COLORS = {
+  1: C.blue,   2: C.counter, 3: '#D4C5A0',
+  4: C.orange, 5: C.green,   6: C.yellow,
+  7: C.purple, 8: C.white,   9: '#8B6420', // used ? block — brown
+};
+const TILE_DARK = {
+  1: C.blueDeep, 2: '#C8C5BC', 3: '#A89468',
+  4: '#B06030',  5: '#3D8A3C', 6: '#C8A800', 9: '#5C3E0A',
+};
+
+function drawTile(c, r, type, sx, sy) {
+  const col  = TILE_COLORS[type]||C.blue;
+  const dark = TILE_DARK[type]||C.blueDeep;
+  ctx.fillStyle=col; ctx.fillRect(sx,sy,TILE,TILE);
+  // Bottom / right shading
+  ctx.fillStyle=dark; ctx.fillRect(sx,sy+TILE-4,TILE,4); ctx.fillRect(sx+TILE-4,sy,4,TILE);
+  // Top / left highlight
+  ctx.fillStyle='rgba(255,255,255,0.15)'; ctx.fillRect(sx,sy,TILE,4); ctx.fillRect(sx,sy,4,TILE);
+
+  if (type===1||type===4||type===5) {
+    // Cabinet door detail
+    ctx.fillStyle=dark; ctx.fillRect(sx+6,sy+6,TILE-12,TILE-12);
+    ctx.fillStyle='rgba(255,255,255,0.10)'; ctx.fillRect(sx+6,sy+6,TILE-12,4);
+    // Knob
+    ctx.fillStyle=dark;
+    ctx.beginPath(); ctx.arc(sx+TILE-12,sy+TILE/2+4,4,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,0.3)';
+    ctx.beginPath(); ctx.arc(sx+TILE-13,sy+TILE/2+3,1.8,0,Math.PI*2); ctx.fill();
+  }
+  if (type===2) {
+    // Counter surface lines
+    ctx.strokeStyle='rgba(0,0,0,0.06)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(sx,sy+TILE/2); ctx.lineTo(sx+TILE,sy+TILE/2); ctx.stroke();
+    // Orange edge on top of ground tiles
+    ctx.fillStyle=C.orange; ctx.fillRect(sx,sy,TILE,5);
+  }
+  if (type===3) {
+    // Brick shelf — tan with mortar lines
+    ctx.strokeStyle='#A89468'; ctx.lineWidth=2;
+    ctx.strokeRect(sx+2,sy+2,TILE-4,TILE-4);
+    ctx.beginPath(); ctx.moveTo(sx+TILE/2,sy+2); ctx.lineTo(sx+TILE/2,sy+TILE-2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sx+2,sy+TILE/2); ctx.lineTo(sx+TILE-2,sy+TILE/2); ctx.stroke();
+  }
+  if (type===6) {
+    // ? block — yellow with question mark
+    ctx.fillStyle=C.treat; ctx.fillRect(sx,sy,TILE,TILE);
+    ctx.fillStyle='rgba(0,0,0,0.15)'; ctx.fillRect(sx,sy+TILE-4,TILE,4); ctx.fillRect(sx+TILE-4,sy,4,TILE);
+    ctx.fillStyle='rgba(255,255,255,0.2)'; ctx.fillRect(sx,sy,TILE,4); ctx.fillRect(sx,sy,4,TILE);
+    ctx.fillStyle=C.white; ctx.font='bold 22px Arial Black'; ctx.textAlign='center';
+    ctx.fillText('?', sx+TILE/2, sy+TILE-8);
+  }
+}
+
+function drawWorld() {
+  // Background — brick wall
+  ctx.fillStyle=C.brickBg; ctx.fillRect(0,0,W,H);
+  // Brick mortar lines
+  const BW=60,BH=22,BG=4;
+  const box=((-(camX*0.4)|0)%(BW+BG)+BW+BG)%(BW+BG);
+  ctx.strokeStyle=C.brickLine; ctx.lineWidth=2; ctx.lineCap='square';
+  for(let r=0;r*((BH+BG))<H+BH+BG;r++){
+    const ry=r*(BH+BG), shift=r%2===0?0:(BW+BG)/2;
+    for(let c=-1;c<Math.ceil(W/(BW+BG))+2;c++){
+      ctx.strokeRect(box-shift+c*(BW+BG)+1,ry+1,BW,BH);
+    }
+  }
+
+  // Ceiling strip
+  ctx.fillStyle=C.ceiling; ctx.fillRect(0,0,W,36);
+  // Upper cabinet row
+  const UW=92,UH=32;
+  const uox=((-(camX*0.85)|0)%(UW+5)+UW+5)%(UW+5);
+  for(let i=-1;i<Math.ceil(W/(UW+5))+2;i++){
+    const ux=uox+i*(UW+5), uy=4;
+    ctx.fillStyle=C.blue; ctx.fillRect(ux,uy,UW,UH);
+    ctx.fillStyle=C.blueDeep; ctx.fillRect(ux+5,uy+5,UW-10,UH-10);
+    ctx.fillStyle='rgba(255,255,255,0.12)'; ctx.fillRect(ux,uy,UW,3);
+    ctx.fillStyle=C.blueDeep;
+    ctx.beginPath(); ctx.arc(ux+UW-12,uy+UH*0.6,4,0,Math.PI*2); ctx.fill();
+  }
+  ctx.fillStyle='rgba(0,0,0,0.10)'; ctx.fillRect(0,36,W,4);
+
+  // Tiles
+  const startC=Math.max(0,Math.floor(camX/TILE)-1);
+  const endC  =Math.min(COLS-1,Math.ceil((camX+W)/TILE)+1);
+  for(let c=startC;c<=endC;c++){
+    for(let r=0;r<ROWS;r++){
+      const t=getTile(c,r); if(!t) continue;
+      const [sx,sy]=worldToScreen(c*TILE, (ROWS-1-r)*TILE);
+      drawTile(c,r,t,sx,sy);
+    }
+  }
+}
+
+function drawCoins() {
+  coins.forEach(coin=>{
+    if(coin.done) return;
+    const [sx,sy]=worldToScreen(coin.x, coin.y);
+    if(sx<-20||sx>W+20) return;
+    const bob=Math.sin(frame*0.1+coin.col*0.5)*3;
+    ctx.fillStyle=C.treat;
+    ctx.beginPath(); ctx.arc(sx,sy+bob,10,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.5)'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(sx,sy+bob,10,0,Math.PI*2); ctx.stroke();
+    ctx.fillStyle=C.white; ctx.font='bold 11px Arial Black'; ctx.textAlign='center';
+    ctx.fillText('$', sx, sy+bob+4);
+  });
+}
+
+function drawTreats() {
+  treats.forEach(t=>{
+    if(t.done||t.hidden) return;
+    const pop=t.popAnim>0 ? t.popAnim/20*14 : 0;
+    const [sx,sy]=worldToScreen(t.x, t.y-pop);
+    if(sx<-40||sx>W+40) return;
+    const bob=Math.sin(frame*0.1+t.col*0.4)*4;
+    ctx.fillStyle=C.white;
+    ctx.beginPath(); ctx.arc(sx,sy+bob,20,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle=C.treat; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(sx,sy+bob,20,0,Math.PI*2); ctx.stroke();
+    ctx.font='20px serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(t.type,sx,sy+bob+1);
+    ctx.textBaseline='alphabetic';
+  });
+}
+
+function drawEnemies() {
+  enemies.forEach(en=>{
+    if(!en.alive&&en.stompAnim<=0) return;
+    const [sx,sy]=worldToScreen(en.x,en.y);
+    if(sx<-40||sx>W+40) return;
+    if(en.stomped) {
+      en.stompAnim--;
+      ctx.globalAlpha=en.stompAnim/30;
+      ctx.fillStyle=C.orange;
+      ctx.beginPath(); ctx.ellipse(sx+en.w/2,sy+en.h-4,en.w/2,8,0,0,Math.PI*2); ctx.fill();
+      ctx.globalAlpha=1; return;
+    }
+    drawEgg(sx+en.w/2, sy+en.h/2, en.w/2, en.vx<0?-1:1, frame);
+  });
+}
+
+function drawEgg(cx, cy, r, dir, f) {
+  const angle = (f * 0.08) * dir;
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(angle);
+
+  // Shell — white egg oval
+  ctx.fillStyle = '#F5F0E8';
+  ctx.beginPath(); ctx.ellipse(0, 0, r*0.82, r, 0, 0, Math.PI*2); ctx.fill();
+  // Shell shading
+  ctx.fillStyle = 'rgba(0,0,0,0.07)';
+  ctx.beginPath(); ctx.ellipse(r*0.18, r*0.2, r*0.55, r*0.7, 0.2, 0, Math.PI*2); ctx.fill();
+  // Shine
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.beginPath(); ctx.ellipse(-r*0.25, -r*0.35, r*0.22, r*0.32, -0.3, 0, Math.PI*2); ctx.fill();
+  // Outline
+  ctx.strokeStyle = '#D4C8B0'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.ellipse(0, 0, r*0.82, r, 0, 0, Math.PI*2); ctx.stroke();
+
+  // Angry face (stays upright via counter-rotate)
+  ctx.rotate(-angle);
+  // Eyes — small dark ovals, angled inward (angry)
+  ctx.fillStyle = C.black;
+  ctx.save(); ctx.rotate(-0.25);
+  ctx.beginPath(); ctx.ellipse(-r*0.28, -r*0.12, r*0.12, r*0.16, 0, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+  ctx.save(); ctx.rotate(0.25);
+  ctx.beginPath(); ctx.ellipse(r*0.28, -r*0.12, r*0.12, r*0.16, 0, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+  // Frown
+  ctx.strokeStyle = C.black; ctx.lineWidth = 1.8; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-r*0.3, r*0.3); ctx.quadraticCurveTo(0, r*0.18, r*0.3, r*0.3);
+  ctx.stroke();
+  // Angry brow lines
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(-r*0.42,-r*0.3); ctx.lineTo(-r*0.16,-r*0.24); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo( r*0.42,-r*0.3); ctx.lineTo( r*0.16,-r*0.24); ctx.stroke();
+
+  ctx.restore();
+}
+
+// ── Duck chef (player) ───────────────────────────────────────
+function drawDuck(x, y, facing, walkF, invincible) {
+  if (invincible>0 && frame%6<3) return; // blink
+  ctx.save();
+  ctx.translate(x + player.w/2, y + player.h/2 - 16); // feet land at y+h (hitbox bottom = floor)
+  ctx.scale(facing, 1);
+
+  const wa = Math.sin(walkF*0.25)*0.22;
+
+  // Wings
+  ctx.save(); ctx.rotate(wa);
+  ctx.fillStyle=C.black;
+  ctx.beginPath(); ctx.ellipse(-23,8,11,6,-0.3,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+  ctx.save(); ctx.rotate(-wa);
+  ctx.fillStyle=C.black;
+  ctx.beginPath(); ctx.ellipse(23,8,11,6,0.3,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+
+  // Body
+  ctx.fillStyle=C.duckShade;
+  ctx.beginPath(); ctx.ellipse(4,5,24,25,0.1,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=C.duckGreen;
+  ctx.beginPath(); ctx.ellipse(-1,2,22,24,-0.08,0,Math.PI*2); ctx.fill();
+
+  // Chest
+  ctx.fillStyle=C.white;
+  ctx.beginPath(); ctx.ellipse(0,13,11,12,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#DADADA';
+  ctx.beginPath(); ctx.roundRect(-6,16,13,9,3); ctx.fill();
+
+  // Eyes squint
+  for(const ex of [-9,9]){
+    ctx.fillStyle=C.black;
+    ctx.beginPath(); ctx.arc(ex,-6,5.5,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle=C.duckGreen;
+    ctx.beginPath(); ctx.ellipse(ex,-8.5,5.5,4,0,Math.PI,Math.PI*2); ctx.fill();
+    ctx.fillStyle=C.white;
+    ctx.beginPath(); ctx.arc(ex-1.5,-7,1.6,0,Math.PI*2); ctx.fill();
+  }
+
+  // Beak
+  ctx.fillStyle=C.beak;
+  ctx.beginPath(); ctx.ellipse(0,-2,11,5,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#E0B010';
+  ctx.beginPath(); ctx.ellipse(0,1,11,3.5,0,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle=C.beakDark; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(-10,0); ctx.lineTo(10,0); ctx.stroke();
+
+  // Feet — animated walk
+  const fa=Math.sin(walkF*0.25)*8;
+  ctx.fillStyle=C.beak;
+  ctx.save(); ctx.rotate(fa*Math.PI/180);
+  ctx.beginPath(); ctx.roundRect(-11,26,10,6,2); ctx.fill(); ctx.restore();
+  ctx.save(); ctx.rotate(-fa*Math.PI/180);
+  ctx.beginPath(); ctx.roundRect(2,26,10,6,2); ctx.fill(); ctx.restore();
+
+  // Hat — tall chef hat (purely visual; clips through blocks, hitbox is body only)
+  ctx.fillStyle=C.white;
+  ctx.beginPath(); ctx.ellipse(0,-24,19,7,0,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='#DDD'; ctx.lineWidth=1.5; ctx.stroke();
+  ctx.fillStyle=C.white; ctx.fillRect(-14,-50,28,28);
+  ctx.beginPath(); ctx.ellipse(0,-50,15,9,0,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='#DDD'; ctx.lineWidth=1.2;
+  for(const hx of[-7,0,7]){
+    ctx.beginPath(); ctx.moveTo(hx,-47); ctx.lineTo(hx,-27); ctx.stroke();
+  }
+
+  // Spoon
+  ctx.save(); ctx.translate(21,16); ctx.rotate(0.5);
+  ctx.fillStyle=C.spoon; ctx.fillRect(-2,-22,4,32);
+  ctx.beginPath(); ctx.ellipse(0,-25,6,9,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=C.spoonDark; ctx.fillRect(-2,-22,4,3);
+  ctx.restore();
+
+  ctx.restore();
+}
+
+// ── Goal flag ────────────────────────────────────────────────
+function drawGoal() {
+  const [gx,gy]=worldToScreen(GOAL_X, 0);
+  if(gx<-60||gx>W+60) return;
+  // Pole
+  ctx.fillStyle='#AAA'; ctx.fillRect(gx+18,gy-H*0.6,6,H*0.6);
+  // Flag
+  const fc=Math.sin(frame*0.08)*5;
+  ctx.fillStyle=C.orange;
+  ctx.beginPath();
+  ctx.moveTo(gx+24,gy-H*0.6);
+  ctx.lineTo(gx+24+60,gy-H*0.6+20+fc);
+  ctx.lineTo(gx+24,gy-H*0.6+40);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle=C.white; ctx.font='bold 14px Arial Black'; ctx.textAlign='center';
+  ctx.fillText("DRS",gx+44,gy-H*0.6+24+fc/2);
+  // Base
+  ctx.fillStyle=C.orange; ctx.fillRect(gx,gy-20,42,20);
+}
+
+// ── HUD ─────────────────────────────────────────────────────
+function drawHUD() {
+  // Score
+  ctx.fillStyle=C.blue;
+  ctx.beginPath(); ctx.roundRect(12,10,140,46,23); ctx.fill();
+  ctx.fillStyle=C.white; ctx.font='bold 10px Arial'; ctx.textAlign='left';
+  ctx.fillText('SCORE', 28, 26);
+  ctx.font='bold 22px Arial Black'; ctx.fillText(score, 28, 48);
+
+  // Lives
+  ctx.fillStyle=C.orange;
+  ctx.beginPath(); ctx.roundRect(W/2-70,10,140,46,23); ctx.fill();
+  ctx.fillStyle=C.white; ctx.font='bold 10px Arial'; ctx.textAlign='center';
+  ctx.fillText('LIVES', W/2, 26);
+  // Duck icons
+  for(let i=0;i<3;i++){
+    const lx=W/2-34+i*24, alive=i<lives;
+    ctx.globalAlpha=alive?1:0.25;
+    ctx.fillStyle=C.duckGreen;
+    ctx.beginPath(); ctx.arc(lx,39,10,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle=C.white;
+    ctx.beginPath(); ctx.ellipse(lx,-1+39+1,5,4,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle=C.beak;
+    ctx.beginPath(); ctx.ellipse(lx+5,36,5,2.5,0,0,Math.PI*2); ctx.fill();
+    ctx.globalAlpha=1;
+  }
+
+  // Hi score
+  ctx.fillStyle=C.green;
+  ctx.beginPath(); ctx.roundRect(W-154,10,142,46,23); ctx.fill();
+  ctx.fillStyle=C.white; ctx.font='bold 10px Arial'; ctx.textAlign='center';
+  ctx.fillText('BEST', W-83, 26);
+  ctx.font='bold 22px Arial Black'; ctx.fillText(hi, W-83, 48);
+}
+
+// ── Modal helpers ───────────────────────────────────────────
+function drawCard(title, headerBg) {
+  ctx.fillStyle='rgba(24,80,136,0.78)'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle=C.white;
+  ctx.beginPath(); ctx.roundRect(W/2-220,H/2-160,440,300,18); ctx.fill();
+  ctx.fillStyle=headerBg;
+  ctx.beginPath(); ctx.roundRect(W/2-220,H/2-160,440,58,[18,18,0,0]); ctx.fill();
+  ctx.fillStyle=C.white; ctx.font='bold 22px Arial Black'; ctx.textAlign='center';
+  ctx.fillText(title, W/2, H/2-120);
+}
+function drawBtn(label, cy, bg) {
+  ctx.fillStyle=bg;
+  ctx.beginPath(); ctx.roundRect(W/2-120,cy-22,240,44,22); ctx.fill();
+  ctx.fillStyle=C.white; ctx.font='bold 18px Arial Black'; ctx.textAlign='center';
+  ctx.fillText(label, W/2, cy+7);
+}
+
+function drawStartScreen() {
+  drawCard("DRAKE'S KITCHEN RUN", C.blue);
+  ctx.fillStyle=C.blue; ctx.font='bold 36px Arial Black'; ctx.textAlign='center';
+  ctx.fillText('LATE NIGHT SNACKER', W/2, H/2-52);
+  ctx.fillStyle='#555'; ctx.font='15px Arial';
+  ctx.fillText('Run, jump & collect treats through the kitchen!', W/2, H/2-18);
+  ctx.fillText('← → to move  ·  ↑ / Space to jump', W/2, H/2+4);
+  // Duck stands on the card floor with a gentle idle bob, no walk animation
+  drawDuck(W/2-20, H/2+62 + Math.round(Math.sin(frame*0.04)*3), 1, 0, 0);
+  drawBtn('PRESS SPACE TO START', H/2+118, C.green);
+}
+
+function drawDeadScreen() {
+  drawCard('GAME OVER!', C.orange);
+  ctx.fillStyle='#444'; ctx.font='bold 15px Arial'; ctx.textAlign='center';
+  ctx.fillText('Score:', W/2, H/2-60);
+  ctx.fillStyle=C.blue; ctx.font='bold 52px Arial Black';
+  ctx.fillText(score, W/2, H/2-10);
+  if(score>=hi&&score>0){
+    ctx.fillStyle=C.green; ctx.font='bold 14px Arial Black';
+    ctx.fillText('NEW HIGH SCORE! 🎂', W/2, H/2+20);
+  } else {
+    ctx.fillStyle='#999'; ctx.font='14px Arial';
+    ctx.fillText(`Best: ${hi}`, W/2, H/2+20);
+  }
+  drawBtn('PLAY AGAIN', H/2+76, C.blue);
+}
+
+function drawWinScreen() {
+  drawCard('YOU WIN! 🎂', C.green);
+  ctx.fillStyle=C.green; ctx.font='bold 26px Arial Black'; ctx.textAlign='center';
+  ctx.fillText('Kitchen cleared!', W/2, H/2-50);
+  ctx.fillStyle='#444'; ctx.font='bold 15px Arial';
+  ctx.fillText('Final score:', W/2, H/2-18);
+  ctx.fillStyle=C.blue; ctx.font='bold 52px Arial Black';
+  ctx.fillText(score, W/2, H/2+20);
+  drawBtn('PLAY AGAIN', H/2+76, C.blue);
+}
+
+// ── Touch controls ───────────────────────────────────────────
+function buildTouchControls() {
+  const zones = [
+    { id:'left',  x:0,        y:H-100, w:130, h:100 },
+    { id:'right', x:130,      y:H-100, w:130, h:100 },
+    { id:'jump',  x:W-160,    y:H-100, w:160, h:100 },
+  ];
+
+  function getTouches(e) {
+    for(const t of e.touches){
+      const r=canvas.getBoundingClientRect();
+      const cx=(t.clientX-r.left)*(W/r.width);
+      const cy=(t.clientY-r.top)*(H/r.height);
+      touchLeft =touchLeft  || (cx>=zones[0].x&&cx<zones[0].x+zones[0].w&&cy>H-110);
+      touchRight=touchRight || (cx>=zones[1].x&&cx<zones[1].x+zones[1].w&&cy>H-110);
+      touchJump =touchJump  || (cx>=zones[2].x&&cy>H-110);
+    }
+  }
+  canvas.addEventListener('touchstart', e=>{ e.preventDefault(); touchLeft=false;touchRight=false;touchJump=false; getTouches(e);
+    if(state==='idle'||state==='dead'||state==='win') handleAction();
+  },{passive:false});
+  canvas.addEventListener('touchmove', e=>{ e.preventDefault(); touchLeft=false;touchRight=false;touchJump=false; getTouches(e); },{passive:false});
+  canvas.addEventListener('touchend', e=>{ e.preventDefault(); touchLeft=false;touchRight=false;touchJump=false; },{passive:false});
+}
+
+function drawTouchHints() {
+  if(!('ontouchstart' in window)) return;
+  const a=0.35;
+  [[0,H-100,130,100,'←'],[130,H-100,130,100,'→'],[W-160,H-100,160,100,'JUMP']].forEach(([x,y,w,h,lbl])=>{
+    ctx.fillStyle=`rgba(0,0,0,${a})`;
+    ctx.beginPath(); ctx.roundRect(x+4,y+4,w-8,h-8,12); ctx.fill();
+    ctx.fillStyle='rgba(255,255,255,0.7)'; ctx.font='bold 22px Arial Black'; ctx.textAlign='center';
+    ctx.fillText(lbl, x+w/2, y+h/2+8);
+  });
+}
+
+// ── Action (start/restart) ───────────────────────────────────
+function handleAction() {
+  if(state==='idle'||state==='dead'||state==='win') {
+    if(score>hi) hi=score;
+    initGame(); state='playing';
+  }
+}
+window.addEventListener('keydown', e=>{
+  if((e.code==='Space'||e.code==='Enter')&&(state==='idle'||state==='dead'||state==='win')) {
+    handleAction();
+  }
+});
+canvas.addEventListener('click', ()=>{ if(state==='idle'||state==='dead'||state==='win') handleAction(); });
+
+// ── Main loop ────────────────────────────────────────────────
+function loop() {
+  requestAnimationFrame(loop);
+  frame++;
+
+  if(state==='playing') update();
+
+  ctx.clearRect(0,0,W,H);
+
+  if(state==='idle') {
+    drawWorld(); drawStartScreen();
+  } else if(state==='playing'||state==='dead'||state==='win') {
+    drawWorld();
+    drawGoal();
+    drawCoins();
+    drawTreats();
+    drawEnemies();
+    const [px,py]=worldToScreen(player.x,player.y);
+    drawDuck(px,py,player.facing,player.walkFrame,player.invincible);
+    drawHUD();
+    drawTouchHints();
+    if(state==='dead') drawDeadScreen();
+    if(state==='win')  drawWinScreen();
+  }
+}
+
+buildTouchControls();
+initGame();
+loop();
+</script>
+</body>
+</html>
